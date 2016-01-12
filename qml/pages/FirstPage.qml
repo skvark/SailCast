@@ -57,17 +57,16 @@ Page {
                 onLinkActivated: Qt.openUrlExternally(link)
             }
 
-            Slider {
+            Label {
                 width: parent.width
-                minimumValue: 90
-                maximumValue: 250
-                value: 140
-                label: "Poll interval (ms), small values will stall the UI"
-                valueText: value + " ms"
-                stepSize: 1;
-                onReleased:  {
-                    ScreenProvider.setInterval(value);
-                }
+                height: 100
+                wrapMode: Text.Wrap
+                font.pixelSize: Theme.fontSizeLarge
+                color: Theme.primaryColor
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: Text.AlignHCenter
+                id: fpstext
+                text: ""
             }
 
             Label {
@@ -97,6 +96,10 @@ Page {
 
         onClientDisconnected: {
             clienttext.text = ""
+        }
+
+        onFpsChanged: {
+            fpstext.text = "Current fps: " + fps;
         }
 
     }

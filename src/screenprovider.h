@@ -11,9 +11,27 @@
 #include <QFutureWatcher>
 #include <QString>
 #include <QTimer>
-#include <QFile>
+
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <linux/input.h>
+#include <linux/fb.h>
+#include <unistd.h>
+
+
+struct framebufferinfo {
+    fb_var_screeninfo scrinfo;
+    fb_fix_screeninfo fix_scrinfo;
+    void *fbmmap;
+    float fps;
+};
+
 
 void streamLoop(qintptr socketDesc, QQueue<QByteArray> &queue, bool& streaming);
+void grabFramesLoop(bool &streaming, framebufferinfo &info, QQueue<QByteArray> &queue);
 
 class ScreenProvider : public QTcpServer
 {
@@ -24,19 +42,18 @@ public:
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
-    Q_INVOKABLE void setInterval(int interval);
     void incomingConnection(qintptr handle) Q_DECL_OVERRIDE;
 
 signals:
     void serverChanged(int port, QString address);
     void clientConnected();
     void clientDisconnected();
+    void fpsChanged(float fps);
 
 public slots:
-    void imageReady(QDBusMessage message);
-    void imageError(QDBusError error, QDBusMessage message);
     void handleEndedStream();
-    void takeScreenshot();
+    void updateFps();
+    void onClientConnected();
 
 private:
 
@@ -46,9 +63,10 @@ private:
     bool streaming_;
     QHostAddress ipAddress_;
     int port_;
-    QTimer* timer_;
-    int interval_;
+    QTimer fpstimer_;
 
+    int fbDevice_;
+    struct framebufferinfo framebufferinfo_;
 };
 
 #endif // SCREENPROVIDER_H
