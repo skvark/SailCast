@@ -13,8 +13,8 @@ Name:       harbour-sailcast
 %{!?qtc_make:%define qtc_make make}
 %{?qtc_builddir:%define _builddir %qtc_builddir}
 Summary:    SailCast is a screen casting tool.
-Version:    0.1
-Release:    1
+Version:    0.2
+Release:    0
 Group:      Qt/Qt
 License:    LICENSE
 URL:        http://example.org/
