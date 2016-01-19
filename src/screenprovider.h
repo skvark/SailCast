@@ -11,6 +11,7 @@
 #include <QFutureWatcher>
 #include <QString>
 #include <QTimer>
+#include <QOrientationSensor>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -26,12 +27,13 @@ struct framebufferinfo {
     fb_var_screeninfo scrinfo;
     fb_fix_screeninfo fix_scrinfo;
     void *fbmmap;
-    float fps;
+    int fps;
+    int frametime;
+    int compression;
 };
 
-
 void streamLoop(qintptr socketDesc, QQueue<QByteArray> &queue, bool& streaming);
-void grabFramesLoop(bool &streaming, framebufferinfo &info, QQueue<QByteArray> &queue);
+void grabFramesLoop(bool &streaming, framebufferinfo &info, QQueue<QByteArray> &queue, QOrientationReading::Orientation &orientation);
 
 class ScreenProvider : public QTcpServer
 {
@@ -41,29 +43,37 @@ public:
     ~ScreenProvider();
 
     Q_INVOKABLE void start();
-    Q_INVOKABLE void stop();
+    Q_INVOKABLE void stopStreaming();
+    Q_INVOKABLE void setCompression(int value);
+    Q_INVOKABLE void setRotate(bool value);
     void incomingConnection(qintptr handle) Q_DECL_OVERRIDE;
 
 signals:
     void serverChanged(int port, QString address);
     void clientConnected();
     void clientDisconnected();
-    void fpsChanged(float fps);
+    void fpsChanged(int fps);
+    void frameTime(int ms);
 
 public slots:
     void handleEndedStream();
     void updateFps();
     void onClientConnected();
+    void orientationChanged();
 
 private:
 
     QFutureWatcher<void> *watcher_;
-    QTcpSocket* clientConnection_;
     QQueue<QByteArray> queue_;
+    QFuture<void> future_;
+    QFuture<void> future2_;
     bool streaming_;
     QHostAddress ipAddress_;
     int port_;
     QTimer fpstimer_;
+    int compression_;
+    QOrientationSensor *orientationSensor_;
+    QOrientationReading::Orientation orientation_;
 
     int fbDevice_;
     struct framebufferinfo framebufferinfo_;

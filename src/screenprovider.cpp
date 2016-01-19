@@ -11,17 +11,20 @@
 #include <QThread>
 #include <QImage>
 #include <QElapsedTimer>
+#include <QOrientationReading>
 
 ScreenProvider::ScreenProvider(QObject* parent): QTcpServer(parent)
 {
     streaming_ = false;
+    orientation_ = QOrientationReading::TopUp;
     struct fb_var_screeninfo var;
     struct fb_fix_screeninfo fix;
 
-    framebufferinfo_.fbmmap = (unsigned int*)MAP_FAILED;
+    framebufferinfo_.fbmmap = (char*)MAP_FAILED;
     framebufferinfo_.scrinfo = var;
     framebufferinfo_.fix_scrinfo = fix;
     framebufferinfo_.fps = 0.0;
+    framebufferinfo_.compression = 50;
 
     fpstimer_.setInterval(1000);
     connect(&fpstimer_, SIGNAL(timeout()), this, SLOT(updateFps()));
@@ -42,19 +45,28 @@ ScreenProvider::ScreenProvider(QObject* parent): QTcpServer(parent)
 
     framebufferinfo_.fbmmap = (unsigned int*)mmap(NULL,
                                                   framebufferinfo_.fix_scrinfo.smem_len,
-                                                  PROT_READ, MAP_SHARED,
+                                                  PROT_READ,
+                                                  MAP_SHARED,
                                                   fbDevice_,
                                                   0);
 
-    if (framebufferinfo_.fbmmap == (unsigned int*)MAP_FAILED){
+    if ((char*)framebufferinfo_.fbmmap == MAP_FAILED){
         return;
     }
 }
 
 ScreenProvider::~ScreenProvider()
 {
-    delete clientConnection_;
-    clientConnection_ = 0;
+    if(streaming_) {
+        stopStreaming();
+    }
+
+    while(future_.isRunning() || future2_.isRunning()) {} // wait threads to exit
+
+    if(orientationSensor_) {
+        orientationSensor_->stop();
+        delete orientationSensor_;
+    }
 
     munmap(framebufferinfo_.fbmmap, framebufferinfo_.fix_scrinfo.smem_len);
 
@@ -100,19 +112,38 @@ void ScreenProvider::incomingConnection(qintptr handle) {
 
         watcher_ = new QFutureWatcher<void>();
         connect(watcher_, SIGNAL(finished()), this, SLOT(handleEndedStream()));
-        QFuture<void> future = QtConcurrent::run(streamLoop,
-                                                 handle,
-                                                 std::ref(queue_),
-                                                 std::ref(streaming_));
-        watcher_->setFuture(future);
-
+        future2_ = QtConcurrent::run(streamLoop,
+                                     handle,
+                                     std::ref(queue_),
+                                     std::ref(streaming_));
+        watcher_->setFuture(future2_);
     }
 }
 
-void ScreenProvider::stop()
+void ScreenProvider::stopStreaming()
 {
     streaming_ = false;
     this->close();
+}
+
+void ScreenProvider::setCompression(int value)
+{
+    framebufferinfo_.compression = value;
+}
+
+void ScreenProvider::setRotate(bool value)
+{
+    if(value) {
+        orientationSensor_ = new QOrientationSensor(this);
+        connect(orientationSensor_, SIGNAL(readingChanged()), this, SLOT(orientationChanged()));
+        orientationSensor_->start();
+    } else {
+        orientationSensor_->stop();
+        disconnect(orientationSensor_, SIGNAL(readingChanged()), this, SLOT(orientationChanged()));
+        delete orientationSensor_;
+        orientationSensor_ = 0;
+        orientation_ = QOrientationReading::TopUp;
+    }
 }
 
 void ScreenProvider::handleEndedStream()
@@ -123,66 +154,113 @@ void ScreenProvider::handleEndedStream()
     disconnect(watcher_, SIGNAL(finished()), this, SLOT(handleEndedStream()));
     delete watcher_;
     watcher_ = 0;
+    framebufferinfo_.fps = 0;
+    framebufferinfo_.frametime = 0;
 }
 
 void ScreenProvider::updateFps()
 {
     emit fpsChanged(framebufferinfo_.fps);
+    emit frameTime(framebufferinfo_.frametime);
 }
 
 void ScreenProvider::onClientConnected()
 {
-    QtConcurrent::run(grabFramesLoop,
-                      std::ref(streaming_),
-                      std::ref(framebufferinfo_),
-                      std::ref(queue_));
+    future_ = QtConcurrent::run(grabFramesLoop,
+                                std::ref(streaming_),
+                                std::ref(framebufferinfo_),
+                                std::ref(queue_),
+                                std::ref(orientation_));
     fpstimer_.start();
 }
 
-void grabFramesLoop(bool &streaming, framebufferinfo &info, QQueue<QByteArray> &queue)
+void ScreenProvider::orientationChanged()
 {
-    QImage* img = new QImage(info.scrinfo.xres, info.scrinfo.yres, QImage::Format_RGBA8888);
-    QBuffer* imgBuffer = new QBuffer();
+    orientation_ = orientationSensor_->reading()->orientation();
+}
+
+void grabFramesLoop(bool &streaming, framebufferinfo &info, QQueue<QByteArray> &queue, QOrientationReading::Orientation &orientation)
+{
+    QImage img(info.scrinfo.xres, info.scrinfo.yres, QImage::Format_RGBA8888);
+    QBuffer imgBuffer;
+
     QElapsedTimer timer;
     timer.start();
-    long long frames = 0;
+
+    int frames = 0;
+    int old = 0;
+    int now = 0;
+    int line = info.fix_scrinfo.line_length / 4;
+    QByteArray ba;
+    QTransform transform;
 
     while(streaming) {
 
         for (unsigned int y = 0; y < info.scrinfo.yres; ++y)
         {
-            QRgb *rowData = (QRgb*)img->scanLine(y);
+            QRgb *rowData = (QRgb*)img.scanLine(y);
             for (unsigned int x = 0; x < info.scrinfo.xres; ++x)
             {
-                unsigned int value = *((unsigned int *)info.fbmmap + ((x + info.scrinfo.xoffset) + (y + info.scrinfo.yoffset) * (info.fix_scrinfo.line_length / 4)));
-                int b = (value) & 0xFF;
-                int g = (value >> 8) & 0xFF;
-                int r = (value >> 16) & 0xFF;
-                int a = (value >> 24)& 0xFF;
-                rowData[x] = qRgba(r, g, b, a);
+                rowData[x] = *((unsigned int *)info.fbmmap + ((x + info.scrinfo.xoffset) + (y + info.scrinfo.yoffset) * line));
             }
         }
 
-        QByteArray ba;
-        imgBuffer->setBuffer(&ba);
-        imgBuffer->open(QIODevice::WriteOnly);
-        img->save(imgBuffer, "JPG");
+        imgBuffer.setBuffer(&ba);
+        imgBuffer.open(QIODevice::WriteOnly);
+
+        if(orientation != QOrientationReading::TopUp) {
+
+            switch (orientation) {
+                case QOrientationReading::TopDown:
+                    img = img.transformed(transform.rotate(180));
+                    break;
+                case QOrientationReading::LeftUp:
+                    img = img.transformed(transform.rotate(90));
+                    break;
+                case QOrientationReading::RightUp:
+                    img = img.transformed(transform.rotate(-90));
+                    break;
+                default:
+                    break;
+            }
+
+            img.save(&imgBuffer, "JPG", info.compression);
+            transform.reset();
+            // reset to original (correct width x height)
+            img = QImage(info.scrinfo.xres, info.scrinfo.yres, QImage::Format_RGBA8888);
+
+        } else {
+            img.save(&imgBuffer, "JPG", info.compression);
+        }
+
         queue.enqueue(ba);
-        imgBuffer->close();
+        imgBuffer.close();
 
         ++frames;
+        now = timer.elapsed();
 
-        info.fps = round((float)frames / (timer.elapsed() / 1000));
+        if(now > old) {
+            info.frametime = now - old;
+        }
 
+        old = now;
+
+        // get average fps over the last 50 frames
+        if(frames == 50) {
+            info.fps = round(50.0 / (timer.restart() / 1000.0));
+            frames = 0;
+        }
     }
-
-    delete img;
-    delete imgBuffer;
+    return;
 }
 
 void streamLoop(qintptr socketDesc, QQueue<QByteArray> &queue, bool& streaming) {
 
-    QTcpSocket* socket = new QTcpSocket(0);
+    QTcpSocket* socket = new QTcpSocket();
+    // TCP_NODELAY + disable Nagle's algorithm
+    socket->setSocketOption(QAbstractSocket::LowDelayOption, QVariant::fromValue(1));
+    // Internetwork control
+    socket->setSocketOption(QAbstractSocket::TypeOfServiceOption, QVariant::fromValue(192));
     socket->setSocketDescriptor(socketDesc);
     socket->readAll();
 
@@ -201,27 +279,37 @@ void streamLoop(qintptr socketDesc, QQueue<QByteArray> &queue, bool& streaming) 
            socket->state() == QAbstractSocket::ConnectedState &&
            streaming) {
 
+        if(queue.empty()) { // no new frame available
+            continue;
+        }
+
+        // make sure that the queue doesn't grow too big or
+        // the OOM killer will kick in
+        if(queue.length() > 20) {
+            queue.clear();
+            continue;
+        }
+
         QByteArray boundary = ("--boundary\r\n" \
                                "Content-Type: image/jpeg\r\n" \
                                "Content-Length: ");
-
-        if(queue.empty()) { // no new frame available
-            QThread::usleep(30); // wait a bit, grabbing single frame takes about 60 ms
-            continue;
-        }
 
         QByteArray img  = queue.dequeue();
         boundary.append(QString::number(img.length()));
         boundary.append("\r\n\r\n");
 
         socket->write(boundary);
+        socket->waitForBytesWritten();
+        boundary.clear();
         socket->write(img);
-        socket->flush();
-
+        socket->waitForBytesWritten();
+        img.clear();
     }
 
-    socket->disconnectFromHost();
+    socket->flush();
+    socket->abort();
     socket->deleteLater();
     streaming = false;
+    queue.clear();
     return;
 }

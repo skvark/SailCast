@@ -37,15 +37,18 @@ Page {
                 enabled: false;
                 anchors.horizontalCenter: parent.horizontalCenter
                 onClicked: {
-                    ScreenProvider.stop();
+                    ScreenProvider.stopStreaming();
                     enabled = false;
                     startbutton.enabled = true;
+                    fpstext.text = "";
+                    frametime.text = "";
+                    addresstext.text = "";
                 }
             }
 
             Label {
                 width: parent.width
-                height: 200
+                height: 140
                 wrapMode: Text.Wrap
                 font.pixelSize: Theme.fontSizeLarge
                 color: Theme.primaryColor
@@ -57,11 +60,50 @@ Page {
                 onLinkActivated: Qt.openUrlExternally(link)
             }
 
-            Label {
+            Slider {
                 width: parent.width
                 height: 100
+                minimumValue: 0
+                maximumValue: 100
+                value: 50
+                label: "JPEG Compression Level"
+                valueText: value
+                stepSize: 1;
+                onReleased:  {
+                    ScreenProvider.setCompression(value);
+                }
+            }
+
+            TextSwitch {
+                anchors.leftMargin: Theme.paddingLarge;
+                anchors.rightMargin: Theme.paddingLarge;
+                anchors.left: parent.left;
+                anchors.right: parent.right;
+                text: "Rotate stream when device is rotated"
+                height: 90
+                checked: false;
+                onCheckedChanged: {
+                    ScreenProvider.setRotate(checked)
+                }
+            }
+
+            Label {
+                width: parent.width
+                height: 70
                 wrapMode: Text.Wrap
-                font.pixelSize: Theme.fontSizeLarge
+                font.pixelSize: Theme.fontSizeMedium
+                color: Theme.primaryColor
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: Text.AlignHCenter
+                id: clienttext
+                text: ""
+            }
+
+            Label {
+                width: parent.width
+                height: 30
+                wrapMode: Text.Wrap
+                font.pixelSize: Theme.fontSizeMedium
                 color: Theme.primaryColor
                 verticalAlignment: Text.AlignVCenter
                 horizontalAlignment: Text.AlignHCenter
@@ -71,13 +113,13 @@ Page {
 
             Label {
                 width: parent.width
-                height: 200
+                height: 30
                 wrapMode: Text.Wrap
-                font.pixelSize: Theme.fontSizeLarge
+                font.pixelSize: Theme.fontSizeMedium
                 color: Theme.primaryColor
                 verticalAlignment: Text.AlignVCenter
                 horizontalAlignment: Text.AlignHCenter
-                id: clienttext
+                id: frametime
                 text: ""
             }
         }
@@ -99,7 +141,11 @@ Page {
         }
 
         onFpsChanged: {
-            fpstext.text = "Current fps: " + fps;
+            fpstext.text = fps + " frames per second";
+        }
+
+        onFrameTime: {
+            frametime.text = "Frame grab time: " + ms + " ms";
         }
 
     }

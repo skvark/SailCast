@@ -14,7 +14,7 @@ TARGET = harbour-sailcast
 
 CONFIG += sailfishapp c++11
 
-QT += network dbus
+QT += network dbus sensors
 
 INCLUDEPATH += src/
 
