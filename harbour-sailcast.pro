@@ -46,5 +46,6 @@ DISTFILES += \
     harbour-sailcast.desktop \
     rpm/harbour-sailcast.spec \
     rpm/harbour-sailcast.changes.in \
-    rpm/harbour-sailcast.yaml
+    rpm/harbour-sailcast.yaml \
+    qml/pages/About.qml
 

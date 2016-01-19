@@ -10,6 +10,16 @@ Page {
 
         contentHeight: column.height
 
+        PullDownMenu {
+            id: menu
+            MenuItem {
+                text: "About"
+                onClicked: {
+                    pageStack.push("About.qml");
+                }
+            }
+        }
+
         Column {
             id: column
 
