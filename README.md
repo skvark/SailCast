@@ -71,8 +71,25 @@ Frame buffer device information:
 
 #### Jolla Tablet
 
-To be added (I guess it's reversed too).
-
 ```
+mode "1536x2048"
+    geometry 1536 2048 1536 2048 32
+    timings 0 0 0 0 0 0 0
+    accel true
+    rgba 8/16,8/8,8/0,0/0
+endmode
+
+Frame buffer device information:
+    Name        : inteldrmfb
+    Address     : 0x80c80000
+    Size        : 12582912
+    Type        : PACKED PIXELS
+    Visual      : TRUECOLOR
+    XPanStep    : 1
+    YPanStep    : 1
+    YWrapStep   : 0
+    LineLength  : 6144
+    Accelerator : No
+
 
 ```
